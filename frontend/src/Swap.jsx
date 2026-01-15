@@ -70,10 +70,17 @@ export function Swap() {
       refetchAllowA(); refetchAllowB();
       refetchBalA(); refetchBalB();
       
+      // LOGIC TO DETERMINE TRANSACTION SUMMARY
+      let txSummary = "Transaction Confirmed";
+      if (amount) {
+        txSummary = `Swapped ${amount} ${tokenSymbol}`;
+      } else if (liqAmountA || liqAmountB) {
+        txSummary = `Added ${liqAmountA} DAI & ${liqAmountB} USDC`;
+      }
+      
       const newEntry = {
         id: hash,
-        type: 'Transaction Confirmed',
-        amount: amount || `${liqAmountA}/${liqAmountB}`,
+        type: txSummary,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       }
       setHistory(prev => [newEntry, ...prev].slice(0, 10))
@@ -128,11 +135,14 @@ export function Swap() {
         <CardContent>
           {/* WELCOME ONBOARDING NOTE */}
           <div className="mb-6 p-4 rounded-xl bg-primary/5 border border-primary/20 backdrop-blur-sm animate-in fade-in slide-in-from-top-2 duration-700">
-            <p className="text-[11px] leading-relaxed text-muted-foreground uppercase tracking-tight text-center">
-              Welcome! First, Go to <span className="text-primary font-bold">faucet</span> to mint test DAI & USDC, 
-              then go to <span className="text-primary font-bold">pool</span> to deposit liquidity, 
-              then Go to <span className="text-primary font-bold">swap</span> to test the exchange.
-            </p>
+            <div className="text-[11px] leading-relaxed text-muted-foreground uppercase tracking-tight text-center space-y-3">
+              <p>
+                Welcome! 👋 Before you start, ensure you have Sepolia ETH test tokens in your MetaMask wallet to pay for gas fees. You can get some for free at the <a href="https://cloud.google.com/application/web3/faucet/ethereum/sepolia" target="_blank" rel="noreferrer" className="text-primary font-bold underline">Google Cloud Faucet</a>.
+              </p>
+              <p>
+                Once you have gas, follow these steps: First, go to the <span className="text-primary font-bold">Faucet</span> tab to mint test DAI & USDC. Then, go to <span className="text-primary font-bold">Pool</span> to deposit liquidity. Finally, head to <span className="text-primary font-bold">Swap</span> to test the exchange!
+              </p>
+            </div>
           </div>
 
           <Tabs defaultValue="swap" className="w-full">
@@ -221,8 +231,11 @@ export function Swap() {
                 {history.length === 0 ? <div className="text-center opacity-40 py-20 text-xs italic">No activity recorded</div> : 
                   history.map((tx) => (
                     <div key={tx.id} className="flex items-center justify-between p-4 rounded-xl bg-muted/20 border border-border/50">
-                      <div className="flex flex-col gap-1"><span className="text-sm font-bold">{tx.type}</span><span className="text-[10px] text-muted-foreground">{tx.time}</span></div>
-                      <a href={`https://sepolia.etherscan.io/tx/${tx.id}`} target="_blank" rel="noreferrer" className="text-[10px] font-bold text-primary">VIEW ↗</a>
+                      <div className="flex flex-col gap-1">
+                        <span className="text-sm font-bold text-foreground">{tx.type}</span>
+                        <span className="text-[10px] text-muted-foreground">{tx.time}</span>
+                      </div>
+                      <a href={`https://sepolia.etherscan.io/tx/${tx.id}`} target="_blank" rel="noreferrer" className="text-[10px] font-bold text-primary hover:underline">VIEW ON ETHERSCAN ↗</a>
                     </div>
                   ))}
               </div>
