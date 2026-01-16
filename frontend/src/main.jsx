@@ -28,8 +28,12 @@ ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <WagmiProvider config={config}>
       <QueryClientProvider client={queryClient}>
-        {/* 3. Wrap App in RainbowKitProvider (using darkTheme to match your site) */}
-        <RainbowKitProvider theme={darkTheme()} coolMode>
+        {/* 3. Wrap App in RainbowKitProvider with Recent Transactions enabled */}
+        <RainbowKitProvider 
+          theme={darkTheme()} 
+          coolMode 
+          showRecentTransactions={true}
+        >
           <App />
         </RainbowKitProvider>
       </QueryClientProvider>
