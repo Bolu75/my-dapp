@@ -7,6 +7,7 @@ import {
   TOKEN_ABI 
 } from './constants'
 
+// Shadcn UI Imports
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
@@ -14,8 +15,9 @@ import { Input } from "@/components/ui/input"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 
 export function Swap() {
-  const { address } = useAccount()
+  const { address, isConnected } = useAccount()
   
+  // States
   const [amount, setAmount] = useState('')
   const [direction, setDirection] = useState('AtoB')
   const [liqAmountA, setLiqAmountA] = useState('')
@@ -26,24 +28,25 @@ export function Swap() {
   const tokenSymbol = direction === 'AtoB' ? 'DAI' : 'USDC'
   const targetSymbol = direction === 'AtoB' ? 'USDC' : 'DAI'
 
-  // Replace with your actual Vercel URL
-  const DAPP_URL = "your-vercel-url.vercel.app";
-
+  // --- 1. BALANCES & ALLOWANCES ---
   const { data: balanceA, refetch: refetchBalA } = useReadContract({
     address: TOKEN_A_ADDRESS, abi: TOKEN_ABI, functionName: 'balanceOf', args: [address],
-    query: { refetchInterval: 5000 }
+    query: { refetchInterval: 5000, enabled: isConnected }
   })
   const { data: balanceB, refetch: refetchBalB } = useReadContract({
     address: TOKEN_B_ADDRESS, abi: TOKEN_ABI, functionName: 'balanceOf', args: [address],
-    query: { refetchInterval: 5000 } 
+    query: { refetchInterval: 5000, enabled: isConnected } 
   })
   const { data: allowanceA, refetch: refetchAllowA } = useReadContract({
-    address: TOKEN_A_ADDRESS, abi: TOKEN_ABI, functionName: 'allowance', args: [address, AMM_ADDRESS]
+    address: TOKEN_A_ADDRESS, abi: TOKEN_ABI, functionName: 'allowance', args: [address, AMM_ADDRESS],
+    query: { enabled: isConnected }
   })
   const { data: allowanceB, refetch: refetchAllowB } = useReadContract({
-    address: TOKEN_B_ADDRESS, abi: TOKEN_ABI, functionName: 'allowance', args: [address, AMM_ADDRESS]
+    address: TOKEN_B_ADDRESS, abi: TOKEN_ABI, functionName: 'allowance', args: [address, AMM_ADDRESS],
+    query: { enabled: isConnected }
   })
 
+  // HELPER FOR UNIFORM FORMATTING
   const formatBalance = (val) => {
     if (!val) return '0.00';
     return parseFloat(formatUnits(val, 18)).toLocaleString(undefined, { 
@@ -54,13 +57,16 @@ export function Swap() {
 
   const formattedBalance = direction === 'AtoB' ? formatBalance(balanceA) : formatBalance(balanceB);
 
+  // --- 2. SWAP ESTIMATION LOGIC ---
   const feePercent = 0.3; 
   const feeAmount = amount ? (parseFloat(amount) * (feePercent / 100)).toFixed(4) : '0.0000';
   const estimatedReceive = amount ? (parseFloat(amount) - parseFloat(feeAmount)).toFixed(4) : '0.0000';
 
-  const { data: hash, writeContract, isPending } = useWriteContract()
+  // --- 3. CONTRACT INTERACTIONS ---
+  const { data: hash, writeContract, isPending, reset } = useWriteContract()
   const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({ hash })
 
+  // --- 4. SUCCESS UPDATES ---
   useEffect(() => { 
     if (isConfirmed && hash) {
       refetchAllowA(); refetchAllowB();
@@ -80,9 +86,11 @@ export function Swap() {
       }
       setHistory(prev => [newEntry, ...prev].slice(0, 10))
       setAmount(''); setLiqAmountA(''); setLiqAmountB('');
+      reset(); // Resets the write state for the next transaction
     } 
   }, [isConfirmed, hash])
 
+  // --- 5. ACTION HANDLERS ---
   const handleSwap = () => {
     const parsedAmount = parseUnits(amount, 18)
     const currentAllowance = direction === 'AtoB' ? allowanceA : allowanceB
@@ -108,10 +116,16 @@ export function Swap() {
     }
   }
 
+  // --- 6. MOBILE DEEP LINK FAILSAFE ---
+  const forceOpenWallet = () => {
+    const dappUrl = window.location.host;
+    window.location.href = `https://metamask.app.link/dapp/${dappUrl}`;
+  };
+
   const TAB_MIN_HEIGHT = "min-h-[480px]" 
 
   return (
-    <div className="flex flex-col items-center justify-center p-0" style={{ fontFamily: 'Arial, Helvetica, sans-serif' }}>
+    <div className="flex flex-col items-center justify-center p-0 font-sans">
       <Card className="w-full max-w-md border-border bg-card/50 backdrop-blur-xl shadow-2xl transition-all duration-300">
         <CardHeader className="space-y-1">
           <div className="flex items-center justify-between">
@@ -129,7 +143,7 @@ export function Swap() {
         <CardContent>
           <div className="mb-6 p-4 rounded-xl bg-primary/5 border border-primary/20 backdrop-blur-sm">
             <div className="text-[11px] leading-relaxed text-muted-foreground uppercase tracking-tight text-center space-y-3">
-              <p>Welcome! 👋 Get Sepolia ETH at the <a href="https://cloud.google.com/application/web3/faucet/ethereum/sepolia" target="_blank" rel="noreferrer" className="text-primary font-bold underline">Google Faucet</a>.</p>
+              <p>Welcome! 👋 Get Sepolia ETH test tokens at the <a href="https://cloud.google.com/application/web3/faucet/ethereum/sepolia" target="_blank" rel="noreferrer" className="text-primary font-bold underline">Google Cloud Faucet</a>.</p>
             </div>
           </div>
 
@@ -141,8 +155,9 @@ export function Swap() {
               <TabsTrigger value="history">History</TabsTrigger>
             </TabsList>
 
-            <TabsContent value="swap" className={`space-y-4 ${TAB_MIN_HEIGHT}`}>
-              <div className="group p-4 rounded-2xl bg-muted/30 border border-transparent">
+            {/* --- TAB 1: SWAP --- */}
+            <TabsContent value="swap" className={`space-y-4 ${TAB_MIN_HEIGHT} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
+              <div className="group p-4 rounded-2xl bg-muted/30 border border-transparent focus-within:border-primary/20 transition-all">
                 <div className="flex justify-between text-[10px] uppercase tracking-widest text-muted-foreground mb-2 font-bold">
                   <span>Selling</span>
                   <span>Balance: <span className="text-foreground">{formattedBalance}</span></span>
@@ -150,14 +165,14 @@ export function Swap() {
                 <div className="flex items-center gap-2">
                   <Input type="number" placeholder="0.0" value={amount} onChange={(e) => setAmount(e.target.value)} className="bg-transparent border-none text-3xl font-semibold focus-visible:ring-0 p-0 h-auto" />
                   <div className="bg-background border border-border px-3 py-1 rounded-full flex items-center gap-2 shadow-sm">
-                    <div className={`w-3.5 h-3.5 rounded-full ${direction === 'AtoB' ? 'bg-yellow-500' : 'bg-blue-600'}`} />
+                    <div className={`w-3.5 h-3.5 rounded-full shadow-inner ${direction === 'AtoB' ? 'bg-yellow-500' : 'bg-blue-600'}`} />
                     <span className="font-bold text-sm">{tokenSymbol}</span>
                   </div>
                 </div>
               </div>
 
               <div className="flex justify-center -my-6 relative z-10">
-                 <Button variant="outline" size="icon" className="h-10 w-10 rounded-xl bg-background border-border hover:bg-muted" onClick={() => { setDirection(direction === 'AtoB' ? 'BtoA' : 'AtoB'); setAmount(''); }}>⇅</Button>
+                 <Button variant="outline" size="icon" className="h-10 w-10 rounded-xl bg-background border-border hover:bg-muted transition-transform hover:rotate-180 duration-500 shadow-md" onClick={() => { setDirection(direction === 'AtoB' ? 'BtoA' : 'AtoB'); setAmount(''); }}>⇅</Button>
               </div>
 
               <div className="p-4 rounded-2xl bg-muted/30 border border-transparent">
@@ -165,27 +180,33 @@ export function Swap() {
                 <div className="flex items-center justify-between">
                   <div className="text-3xl font-semibold opacity-90">{estimatedReceive}</div>
                   <div className="bg-background border border-border px-3 py-1 rounded-full flex items-center gap-2 shadow-sm">
-                    <div className={`w-3.5 h-3.5 rounded-full ${direction === 'AtoB' ? 'bg-blue-600' : 'bg-yellow-500'}`} />
+                    <div className={`w-3.5 h-3.5 rounded-full shadow-inner ${direction === 'AtoB' ? 'bg-blue-600' : 'bg-yellow-500'}`} />
                     <span className="font-bold text-sm">{targetSymbol}</span>
                   </div>
                 </div>
               </div>
 
-              {/* ACTION BUTTON WITH DEEP LINK HELPER */}
-              <div className="space-y-3">
+              {amount > 0 && (
+                <div className="p-3 rounded-xl bg-muted/20 border border-border/40 space-y-2 text-[11px]">
+                  <div className="flex justify-between"><span className="text-muted-foreground">Protocol Fee (0.3%)</span><span className="font-mono">{feeAmount} {tokenSymbol}</span></div>
+                  <div className="pt-2 border-t border-border/20 flex justify-between font-bold"><span>Minimum Received</span><span className="text-foreground">{estimatedReceive} {targetSymbol}</span></div>
+                </div>
+              )}
+
+              <div className="space-y-3 pt-2">
                 <Button className="w-full py-7 text-lg font-bold rounded-2xl shadow-lg active:scale-[0.98]" disabled={isPending || isConfirming || !amount} onClick={handleSwap}>
                   {isPending ? "Confirm in Wallet..." : isConfirming ? "Mining..." : (direction === 'AtoB' ? allowanceA : allowanceB) < parseUnits(amount || '0', 18) ? `Approve ${tokenSymbol}` : `Swap ${tokenSymbol}`}
                 </Button>
-                
                 {isPending && (
-                  <p className="text-center text-[11px] text-blue-400 animate-pulse">
-                    Waiting for popup... <a href={`https://metamask.app.link/dapp/${DAPP_URL}`} className="underline font-bold">Open MetaMask App</a>
-                  </p>
+                  <button onClick={forceOpenWallet} className="w-full text-center text-[11px] text-blue-400 animate-pulse underline">
+                    Wallet not opening? Tap to force-open MetaMask
+                  </button>
                 )}
               </div>
             </TabsContent>
 
-            <TabsContent value="liquidity" className={`space-y-4 ${TAB_MIN_HEIGHT}`}>
+            {/* --- TAB 2: POOL --- */}
+            <TabsContent value="liquidity" className={`space-y-4 ${TAB_MIN_HEIGHT} animate-in fade-in duration-300`}>
               <div className="p-4 rounded-2xl bg-muted/30 border border-transparent">
                 <div className="flex justify-between text-[10px] uppercase tracking-widest text-muted-foreground mb-2 font-bold"><span>Deposit DAI</span><span>Bal: {formatBalance(balanceA)}</span></div>
                 <Input type="number" placeholder="0.0" value={liqAmountA} onChange={(e) => setLiqAmountA(e.target.value)} className="bg-transparent border-none text-2xl font-semibold focus-visible:ring-0 p-0 h-auto" />
@@ -200,14 +221,15 @@ export function Swap() {
                   {isPending ? "Confirm in Wallet..." : isConfirming ? "Processing..." : allowanceA < parseUnits(liqAmountA || '0', 18) ? "Approve DAI" : allowanceB < parseUnits(liqAmountB || '0', 18) ? "Approve USDC" : "Add Liquidity"}
                 </Button>
                 {isPending && (
-                  <p className="text-center text-[11px] text-emerald-400 animate-pulse">
-                    Trouble opening wallet? <a href={`https://metamask.app.link/dapp/${DAPP_URL}`} className="underline font-bold">Open App</a>
-                  </p>
+                   <button onClick={forceOpenWallet} className="w-full text-center text-[11px] text-emerald-400 animate-pulse underline font-medium">
+                    Wallet sluggish? Tap to wake up MetaMask
+                   </button>
                 )}
               </div>
               {isConfirmed && <Alert className="bg-emerald-500/10 border-emerald-500/50 text-emerald-500 py-2 rounded-xl"><AlertDescription className="text-center font-medium">Pool Updated! ✅</AlertDescription></Alert>}
             </TabsContent>
 
+            {/* --- TAB 3: FAUCET --- */}
             <TabsContent value="faucet" className={`space-y-6 py-4 ${TAB_MIN_HEIGHT} flex flex-col`}>
               <div className="p-4 bg-muted/20 border border-border/50 rounded-xl text-center"><p className="text-xs text-muted-foreground uppercase font-bold">Testnet Faucet</p></div>
               <div className="grid grid-cols-2 gap-3 flex-1">
@@ -220,6 +242,7 @@ export function Swap() {
               </div>
             </TabsContent>
 
+            {/* --- TAB 4: HISTORY --- */}
             <TabsContent value="history" className={`py-2 ${TAB_MIN_HEIGHT}`}>
               <div className="space-y-3 overflow-y-auto max-h-[440px] custom-scrollbar">
                 {history.length === 0 ? <div className="text-center opacity-40 py-20 text-xs italic">No activity recorded</div> : 
