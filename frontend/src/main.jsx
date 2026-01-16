@@ -21,7 +21,7 @@ const config = getDefaultConfig({
     // This connects Wagmi to your Infura node
     [sepolia.id]: http("https://sepolia.infura.io/v3/2ec0c78b6f58447098f00c7690f61129"),
   },
-  ssr: false, 
+  ssr: true, 
 })
 
 ReactDOM.createRoot(document.getElementById('root')).render(
