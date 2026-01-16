@@ -7,7 +7,7 @@ function App() {
       {/* 1. Use the professional ConnectButton here */}
       <ConnectButton />
 
-      {/* 2. Your Triple-Tab Swap Card */}
+      {/* 2. Your Triple-Tab Swap Cards */}
       <Swap />
     </div>
   )
