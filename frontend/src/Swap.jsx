@@ -7,7 +7,7 @@ import {
   TOKEN_ABI 
 } from './constants'
 
-// UI Components
+// Shadcn UI Imports
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
@@ -15,8 +15,9 @@ import { Input } from "@/components/ui/input"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 
 export function Swap() {
-  const { address, isConnected } = useAccount()
+  const { address } = useAccount()
   
+  // States
   const [amount, setAmount] = useState('')
   const [direction, setDirection] = useState('AtoB')
   const [liqAmountA, setLiqAmountA] = useState('')
@@ -27,65 +28,83 @@ export function Swap() {
   const tokenSymbol = direction === 'AtoB' ? 'DAI' : 'USDC'
   const targetSymbol = direction === 'AtoB' ? 'USDC' : 'DAI'
 
-  // --- 1. DATA READS (With safety enabled: isConnected) ---
+  // --- 1. BALANCES & ALLOWANCES ---
   const { data: balanceA, refetch: refetchBalA } = useReadContract({
     address: TOKEN_A_ADDRESS, abi: TOKEN_ABI, functionName: 'balanceOf', args: [address],
-    query: { enabled: !!address && isConnected }
+    query: { refetchInterval: 5000 }
   })
   const { data: balanceB, refetch: refetchBalB } = useReadContract({
     address: TOKEN_B_ADDRESS, abi: TOKEN_ABI, functionName: 'balanceOf', args: [address],
-    query: { enabled: !!address && isConnected } 
+    query: { refetchInterval: 5000 } 
   })
   const { data: allowanceA, refetch: refetchAllowA } = useReadContract({
-    address: TOKEN_A_ADDRESS, abi: TOKEN_ABI, functionName: 'allowance', args: [address, AMM_ADDRESS],
-    query: { enabled: !!address && isConnected }
+    address: TOKEN_A_ADDRESS, abi: TOKEN_ABI, functionName: 'allowance', args: [address, AMM_ADDRESS]
   })
   const { data: allowanceB, refetch: refetchAllowB } = useReadContract({
-    address: TOKEN_B_ADDRESS, abi: TOKEN_ABI, functionName: 'allowance', args: [address, AMM_ADDRESS],
-    query: { enabled: !!address && isConnected }
+    address: TOKEN_B_ADDRESS, abi: TOKEN_ABI, functionName: 'allowance', args: [address, AMM_ADDRESS]
   })
 
-  // --- 2. CONTRACT WRITES ---
-  const { data: hash, writeContract, isPending, reset } = useWriteContract()
+  // HELPER FOR UNIFORM FORMATTING (Rounded to 2 DP)
+  const formatBalance = (val) => {
+    if (!val) return '0.00';
+    return parseFloat(formatUnits(val, 18)).toLocaleString(undefined, { 
+      minimumFractionDigits: 2, 
+      maximumFractionDigits: 2 
+    });
+  }
+
+  const formattedBalance = direction === 'AtoB' ? formatBalance(balanceA) : formatBalance(balanceB);
+
+  // --- 2. SWAP ESTIMATION LOGIC ---
+  const feePercent = 0.3; 
+  const feeAmount = amount ? (parseFloat(amount) * (feePercent / 100)).toFixed(4) : '0.0000';
+  const estimatedReceive = amount ? (parseFloat(amount) - parseFloat(feeAmount)).toFixed(4) : '0.0000';
+
+  // --- 3. CONTRACT INTERACTIONS ---
+  const { data: hash, writeContract, isPending } = useWriteContract()
   const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({ hash })
 
-  // --- 3. AUTO-REFRESH & SUCCESS LOGIC ---
+  // --- 4. SUCCESS UPDATES ---
   useEffect(() => { 
     if (isConfirmed && hash) {
       refetchAllowA(); refetchAllowB();
       refetchBalA(); refetchBalB();
       
+      // LOGIC TO DETERMINE TRANSACTION SUMMARY
+      let txSummary = "Transaction Confirmed";
+      if (amount) {
+        txSummary = `Swapped ${amount} ${tokenSymbol}`;
+      } else if (liqAmountA || liqAmountB) {
+        txSummary = `Added ${liqAmountA} DAI & ${liqAmountB} USDC`;
+      }
+      
       const newEntry = {
         id: hash,
-        type: amount ? `Swapped ${amount} ${tokenSymbol}` : "Pool Updated",
+        type: txSummary,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       }
       setHistory(prev => [newEntry, ...prev].slice(0, 10))
       setAmount(''); setLiqAmountA(''); setLiqAmountB('');
-      reset(); 
     } 
   }, [isConfirmed, hash])
 
-  // --- 4. HANDLERS ---
+  // --- 5. ACTION HANDLERS ---
   const handleSwap = () => {
-    if (!amount) return
-    const val = parseUnits(amount, 18)
-    const allowance = direction === 'AtoB' ? allowanceA : allowanceB
-    
-    if (allowance < val) {
-      writeContract({ address: activeToken, abi: TOKEN_ABI, functionName: 'approve', args: [AMM_ADDRESS, val] })
+    const parsedAmount = parseUnits(amount, 18)
+    const currentAllowance = direction === 'AtoB' ? allowanceA : allowanceB
+    if (currentAllowance < parsedAmount) {
+      writeContract({ address: activeToken, abi: TOKEN_ABI, functionName: 'approve', args: [AMM_ADDRESS, parsedAmount] })
     } else {
       writeContract({
         address: AMM_ADDRESS, abi: AMM_ABI,
         functionName: direction === 'AtoB' ? 'swapAforB' : 'swapBforA',
-        args: [val]
+        args: [parsedAmount]
       })
     }
   }
 
   const handleAddLiquidity = () => {
-    const pA = parseUnits(liqAmountA || '0', 18); 
-    const pB = parseUnits(liqAmountB || '0', 18)
+    const pA = parseUnits(liqAmountA, 18); const pB = parseUnits(liqAmountB, 18)
     if (allowanceA < pA) {
       writeContract({ address: TOKEN_A_ADDRESS, abi: TOKEN_ABI, functionName: 'approve', args: [AMM_ADDRESS, pA] })
     } else if (allowanceB < pB) {
@@ -95,22 +114,37 @@ export function Swap() {
     }
   }
 
-  const formatBal = (v) => v ? parseFloat(formatUnits(v, 18)).toFixed(2) : '0.00'
+  const TAB_MIN_HEIGHT = "min-h-[480px]" 
 
   return (
-    <div className="flex flex-col items-center justify-center p-4">
-      <Card className="w-full max-w-md border-border bg-card/50 backdrop-blur-xl shadow-2xl">
-        <CardHeader>
+    <div className="flex flex-col items-center justify-center p-0" style={{ fontFamily: 'Arial, Helvetica, sans-serif' }}>
+      <Card className="w-full max-w-md border-border bg-card/50 backdrop-blur-xl shadow-2xl transition-all duration-300">
+        <CardHeader className="space-y-1">
           <div className="flex items-center justify-between">
-            <CardTitle className="text-2xl font-bold">StableSwap</CardTitle>
+            <CardTitle className="text-2xl font-bold tracking-tight text-foreground">StableSwap</CardTitle>
             <div className="flex items-center gap-2">
-               <div className={`h-2 w-2 rounded-full ${isConnected ? 'bg-emerald-500' : 'bg-red-500'}`} />
-               <div className="text-[10px] text-muted-foreground font-mono uppercase">Sepolia</div>
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+              <span className="text-[10px] text-muted-foreground uppercase font-mono tracking-tighter">Sepolia Live</span>
             </div>
           </div>
         </CardHeader>
 
         <CardContent>
+          {/* WELCOME ONBOARDING NOTE */}
+          <div className="mb-6 p-4 rounded-xl bg-primary/5 border border-primary/20 backdrop-blur-sm animate-in fade-in slide-in-from-top-2 duration-700">
+            <div className="text-[11px] leading-relaxed text-muted-foreground uppercase tracking-tight text-center space-y-3">
+              <p>
+                Welcome! 👋 Before you start, ensure you have Sepolia ETH test tokens in your MetaMask wallet to pay for gas fees. You can get some for free at the <a href="https://cloud.google.com/application/web3/faucet/ethereum/sepolia" target="_blank" rel="noreferrer" className="text-primary font-bold underline">Google Cloud Faucet</a>.
+              </p>
+              <p>
+                Once you have gas, follow these steps: First, go to the <span className="text-primary font-bold">Faucet</span> tab to mint test DAI & USDC. Then, go to <span className="text-primary font-bold">Pool</span> to deposit liquidity. Finally, head to <span className="text-primary font-bold">Swap</span> to test the exchange!
+              </p>
+            </div>
+          </div>
+
           <Tabs defaultValue="swap" className="w-full">
             <TabsList className="grid w-full grid-cols-4 mb-8 bg-muted/50 p-1">
               <TabsTrigger value="swap">Swap</TabsTrigger>
@@ -119,95 +153,92 @@ export function Swap() {
               <TabsTrigger value="history">History</TabsTrigger>
             </TabsList>
 
-            {/* SWAP TAB */}
-            <TabsContent value="swap" className="space-y-4 min-h-[400px]">
-              <div className="p-4 rounded-2xl bg-muted/30 border border-transparent">
-                <div className="flex justify-between text-[10px] text-muted-foreground font-bold mb-2 uppercase">
-                  <span>Pay</span>
-                  <span>Bal: {direction === 'AtoB' ? formatBal(balanceA) : formatBal(balanceB)}</span>
+            {/* --- TAB 1: SWAP --- */}
+            <TabsContent value="swap" className={`space-y-4 ${TAB_MIN_HEIGHT} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
+              <div className="group p-4 rounded-2xl bg-muted/30 border border-transparent focus-within:border-primary/20 transition-all">
+                <div className="flex justify-between text-[10px] uppercase tracking-widest text-muted-foreground mb-2 font-bold">
+                  <span>Selling</span>
+                  <span>Balance: <span className="text-foreground">{formattedBalance}</span></span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Input type="number" placeholder="0.0" value={amount} onChange={(e) => setAmount(e.target.value)} className="bg-transparent border-none text-3xl font-semibold p-0 h-auto focus-visible:ring-0" />
-                  <div className="bg-background px-3 py-1 rounded-full text-sm font-bold shadow-sm">{tokenSymbol}</div>
+                  <Input type="number" placeholder="0.0" value={amount} onChange={(e) => setAmount(e.target.value)} className="bg-transparent border-none text-3xl font-semibold focus-visible:ring-0 p-0 h-auto" />
+                  <div className="bg-background border border-border px-3 py-1 rounded-full flex items-center gap-2 shadow-sm">
+                    <div className={`w-3.5 h-3.5 rounded-full shadow-inner ${direction === 'AtoB' ? 'bg-yellow-500' : 'bg-blue-600'}`} />
+                    <span className="font-bold text-sm">{tokenSymbol}</span>
+                  </div>
                 </div>
               </div>
 
-              {/* Direction Toggle */}
               <div className="flex justify-center -my-6 relative z-10">
-                 <Button variant="outline" size="icon" className="h-10 w-10 rounded-xl shadow-md bg-background" onClick={() => setDirection(direction === 'AtoB' ? 'BtoA' : 'AtoB')}>⇅</Button>
+                 <Button variant="outline" size="icon" className="h-10 w-10 rounded-xl bg-background border-border hover:bg-muted transition-transform hover:rotate-180 duration-500 shadow-md" onClick={() => { setDirection(direction === 'AtoB' ? 'BtoA' : 'AtoB'); setAmount(''); }}>⇅</Button>
               </div>
 
               <div className="p-4 rounded-2xl bg-muted/30 border border-transparent">
-                <div className="flex justify-between text-[10px] text-muted-foreground font-bold mb-2 uppercase">
-                  <span>Receive</span>
-                  <span>Bal: {direction === 'AtoB' ? formatBal(balanceB) : formatBal(balanceA)}</span>
-                </div>
+                <div className="flex justify-between text-[10px] uppercase tracking-widest text-muted-foreground mb-2 font-bold"><span>Buying (Estimated)</span></div>
                 <div className="flex items-center justify-between">
-                  <div className="text-3xl font-semibold opacity-50">{amount || '0.0'}</div>
-                  <div className="bg-background px-3 py-1 rounded-full text-sm font-bold shadow-sm">{targetSymbol}</div>
-                </div>
-              </div>
-
-              <div className="pt-2 space-y-3">
-                <Button className="w-full py-7 text-lg font-bold rounded-2xl transition-all active:scale-95" disabled={isPending || isConfirming || !amount} onClick={handleSwap}>
-                  {isPending ? "Waiting for Wallet..." : isConfirming ? "Confirming..." : (direction === 'AtoB' ? allowanceA : allowanceB) < parseUnits(amount || '0', 18) ? "Approve" : "Swap"}
-                </Button>
-                
-                {isPending && (
-                  <p className="text-[11px] text-center text-blue-400 animate-pulse underline cursor-pointer" onClick={() => window.location.href = `https://metamask.app.link/dapp/${window.location.host}`}>
-                    Metamask not opening? Tap to wake it up.
-                  </p>
-                )}
-              </div>
-            </TabsContent>
-
-            {/* POOL TAB */}
-            <TabsContent value="liquidity" className="space-y-4 min-h-[400px]">
-              <div className="space-y-4">
-                <div className="p-4 rounded-xl bg-muted/20">
-                  <span className="text-[10px] text-muted-foreground uppercase font-bold">DAI Amount</span>
-                  <Input type="number" placeholder="0.0" value={liqAmountA} onChange={(e) => setLiqAmountA(e.target.value)} className="bg-transparent border-none text-xl p-0 h-auto focus-visible:ring-0" />
-                </div>
-                <div className="p-4 rounded-xl bg-muted/20">
-                  <span className="text-[10px] text-muted-foreground uppercase font-bold">USDC Amount</span>
-                  <Input type="number" placeholder="0.0" value={liqAmountB} onChange={(e) => setLiqAmountB(e.target.value)} className="bg-transparent border-none text-xl p-0 h-auto focus-visible:ring-0" />
-                </div>
-                <Button className="w-full py-7 text-lg font-bold rounded-2xl bg-emerald-600 hover:bg-emerald-700" onClick={handleAddLiquidity} disabled={isPending || !liqAmountA}>
-                  {isPending ? "Check Wallet..." : "Add Liquidity"}
-                </Button>
-              </div>
-              {isConfirmed && <Alert className="bg-emerald-500/10 border-emerald-500/50 text-emerald-500"><AlertDescription className="text-center font-bold">Pool Updated! ✅</AlertDescription></Alert>}
-            </TabsContent>
-
-            {/* FAUCET TAB */}
-            <TabsContent value="faucet" className="space-y-4 min-h-[400px]">
-              <div className="grid grid-cols-2 gap-4 pt-4">
-                <Button variant="outline" className="py-12 flex flex-col gap-2 rounded-2xl border-dashed" onClick={() => writeContract({ address: TOKEN_A_ADDRESS, abi: TOKEN_ABI, functionName: 'mint', args: [address, parseUnits("1000", 18)] })}>
-                  <span className="text-[10px] uppercase opacity-50 font-bold">DAI</span>
-                  <span className="font-bold">Mint 1,000</span>
-                </Button>
-                <Button variant="outline" className="py-12 flex flex-col gap-2 rounded-2xl border-dashed" onClick={() => writeContract({ address: TOKEN_B_ADDRESS, abi: TOKEN_ABI, functionName: 'mint', args: [address, parseUnits("1000", 18)] })}>
-                  <span className="text-[10px] uppercase opacity-50 font-bold">USDC</span>
-                  <span className="font-bold">Mint 1,000</span>
-                </Button>
-              </div>
-            </TabsContent>
-
-            {/* HISTORY TAB */}
-            <TabsContent value="history" className="space-y-2 min-h-[400px]">
-              {history.length === 0 ? (
-                <div className="text-center py-20 text-muted-foreground text-sm italic opacity-50">No activity yet</div>
-              ) : (
-                history.map(tx => (
-                  <div key={tx.id} className="p-4 rounded-xl bg-muted/20 border border-border flex justify-between items-center text-xs">
-                    <div className="flex flex-col">
-                      <span className="font-bold">{tx.type}</span>
-                      <span className="opacity-50">{tx.time}</span>
-                    </div>
-                    <a href={`https://sepolia.etherscan.io/tx/${tx.id}`} target="_blank" className="text-primary font-bold hover:underline">VIEW SCAN ↗</a>
+                  <div className="text-3xl font-semibold opacity-90">{estimatedReceive}</div>
+                  <div className="bg-background border border-border px-3 py-1 rounded-full flex items-center gap-2 shadow-sm">
+                    <div className={`w-3.5 h-3.5 rounded-full shadow-inner ${direction === 'AtoB' ? 'bg-blue-600' : 'bg-yellow-500'}`} />
+                    <span className="font-bold text-sm">{targetSymbol}</span>
                   </div>
-                ))
+                </div>
+              </div>
+
+              {amount > 0 && (
+                <div className="p-3 rounded-xl bg-muted/20 border border-border/40 space-y-2 animate-in fade-in slide-in-from-top-1 duration-300 text-[11px]">
+                  <div className="flex justify-between"><span className="text-muted-foreground">Protocol Fee (0.3%)</span><span className="font-mono">{feeAmount} {tokenSymbol}</span></div>
+                  <div className="pt-2 border-t border-border/20 flex justify-between font-bold"><span>Minimum Received</span><span className="text-foreground">{estimatedReceive} {targetSymbol}</span></div>
+                </div>
               )}
+
+              <Button className="w-full py-7 text-lg font-bold rounded-2xl shadow-lg active:scale-[0.98]" disabled={isPending || isConfirming || !amount} onClick={handleSwap}>
+                {isPending ? "Waiting for Wallet..." : isConfirming ? "Mining..." : (direction === 'AtoB' ? allowanceA : allowanceB) < parseUnits(amount || '0', 18) ? `Approve ${tokenSymbol}` : `Swap ${tokenSymbol}`}
+              </Button>
+            </TabsContent>
+
+            {/* --- TAB 2: POOL --- */}
+            <TabsContent value="liquidity" className={`space-y-4 ${TAB_MIN_HEIGHT} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
+              <div className="p-4 rounded-2xl bg-muted/30 border border-transparent">
+                <div className="flex justify-between text-[10px] uppercase tracking-widest text-muted-foreground mb-2 font-bold"><span>Deposit DAI</span><span>Bal: {formatBalance(balanceA)}</span></div>
+                <Input type="number" placeholder="0.0" value={liqAmountA} onChange={(e) => setLiqAmountA(e.target.value)} className="bg-transparent border-none text-2xl font-semibold focus-visible:ring-0 p-0 h-auto" />
+              </div>
+              <div className="p-4 rounded-2xl bg-muted/30 border border-transparent">
+                <div className="flex justify-between text-[10px] uppercase tracking-widest text-muted-foreground mb-2 font-bold"><span>Deposit USDC</span><span>Bal: {formatBalance(balanceB)}</span></div>
+                <Input type="number" placeholder="0.0" value={liqAmountB} onChange={(e) => setLiqAmountB(e.target.value)} className="bg-transparent border-none text-2xl font-semibold focus-visible:ring-0 p-0 h-auto" />
+              </div>
+              <Button className="w-full py-7 text-lg font-bold rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 shadow-emerald-500/10" disabled={isPending || isConfirming || !liqAmountA || !liqAmountB} onClick={handleAddLiquidity}>
+                {isPending ? "Confirming..." : isConfirming ? "Processing..." : allowanceA < parseUnits(liqAmountA || '0', 18) ? "Approve DAI" : allowanceB < parseUnits(liqAmountB || '0', 18) ? "Approve USDC" : "Add Liquidity"}
+              </Button>
+              {isConfirmed && <Alert className="bg-emerald-500/10 border-emerald-500/50 text-emerald-500 py-2 rounded-xl"><AlertDescription className="text-center font-medium">Pool Updated! ✅</AlertDescription></Alert>}
+            </TabsContent>
+
+            {/* --- TAB 3: FAUCET --- */}
+            <TabsContent value="faucet" className={`space-y-6 py-4 ${TAB_MIN_HEIGHT} flex flex-col`}>
+              <div className="p-4 bg-muted/20 border border-border/50 rounded-xl text-center"><p className="text-xs text-muted-foreground uppercase font-bold">Testnet Faucet</p></div>
+              <div className="grid grid-cols-2 gap-3 flex-1">
+                <Button variant="outline" className="h-24 flex flex-col gap-1 border-dashed rounded-xl" onClick={() => writeContract({ address: TOKEN_A_ADDRESS, abi: TOKEN_ABI, functionName: 'mint', args: [address, parseUnits("1000", 18)] })}>
+                  <span className="text-[10px] text-muted-foreground uppercase font-bold">Mint</span><span className="font-bold">1,000 DAI</span>
+                </Button>
+                <Button variant="outline" className="h-24 flex flex-col gap-1 border-dashed rounded-xl" onClick={() => writeContract({ address: TOKEN_B_ADDRESS, abi: TOKEN_ABI, functionName: 'mint', args: [address, parseUnits("1000", 18)] })}>
+                  <span className="text-[10px] text-muted-foreground uppercase font-bold">Mint</span><span className="font-bold">1,000 USDC</span>
+                </Button>
+              </div>
+            </TabsContent>
+
+            {/* --- TAB 4: HISTORY --- */}
+            <TabsContent value="history" className={`py-2 ${TAB_MIN_HEIGHT}`}>
+              <div className="space-y-3 overflow-y-auto max-h-[440px] custom-scrollbar">
+                {history.length === 0 ? <div className="text-center opacity-40 py-20 text-xs italic">No activity recorded</div> : 
+                  history.map((tx) => (
+                    <div key={tx.id} className="flex items-center justify-between p-4 rounded-xl bg-muted/20 border border-border/50">
+                      <div className="flex flex-col gap-1">
+                        <span className="text-sm font-bold text-foreground">{tx.type}</span>
+                        <span className="text-[10px] text-muted-foreground">{tx.time}</span>
+                      </div>
+                      <a href={`https://sepolia.etherscan.io/tx/${tx.id}`} target="_blank" rel="noreferrer" className="text-[10px] font-bold text-primary hover:underline">VIEW ON ETHERSCAN ↗</a>
+                    </div>
+                  ))}
+              </div>
             </TabsContent>
           </Tabs>
         </CardContent>
