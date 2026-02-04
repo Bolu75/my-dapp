@@ -43,15 +43,5 @@ npm run dev
 # Environment Variables
 To run this project locally, you must create a .env file in both the frontend and backend folders. Note: These files are ignored by Git for security.
 
-Backend (.env)
-PRIVATE_KEY: Your wallet private key (e.g., from MetaMask).
-
-INFURA_API_KEY: Your Infura Project ID.
-
-ETHERSCAN_API_KEY: Required for contract verification.
-
-Frontend (.env)
-VITE_INFURA_URL: Your full Infura Sepolia RPC URL (Must start with VITE_).
-
 # 📜 License
 This project is licensed under the MIT License.
